@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Driver Dashboard UI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #000000;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-blue: #0ea5e9;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
+        }
+
+        body, html {
+            margin: 0; padding: 0; height: 100vh; width: 100vw;
+            background-color: var(--bg-color); color: var(--text-main); 
+            font-family: 'Inter', sans-serif; overflow: hidden; user-select: none;
+        }
+
+        /* 3-Panel Global Layout */
+        .dashboard {
+            width: 100vw; height: 100vh; display: flex;
+        }
+
+        .panel { position: relative; height: 100%; display: flex; flex-direction: column; }
+        
+        .map-panel { flex: 1; min-width: 300px; background: #0c0f12; overflow: hidden; }
+        .road-panel { 
+            flex: 1.4; min-width: 450px; 
+            background: linear-gradient(180deg, #181d24 0%, #050608 100%);
+            border-left: 1px solid rgba(255,255,255,0.03); border-right: 1px solid rgba(255,255,255,0.03);
+            display: flex; flex-direction: column; align-items: center; position: relative; z-index: 10;
+        }
+        .dial-panel { 
+            flex: 1; min-width: 300px; 
+            background: #0a0c10;
+            display: flex; justify-content: center; align-items: center;
+        }
+
+        /* ----- LEFT PANEL (MAP) ----- */
+        .map-bg {
+            position: absolute; inset: 0;
+            background-image: 
+                radial-gradient(circle at 40% 40%, rgba(59, 130, 246, 0.1) 0%, transparent 50%),
+                repeating-linear-gradient(45deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 2px, transparent 2px, transparent 150px),
+                repeating-linear-gradient(-45deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 2px, transparent 2px, transparent 150px);
+            opacity: 0.8;
+        }
+        .map-route {
+            position: absolute; width: 8px; height: 400px; background: var(--accent-blue);
+            left: 50%; top: 30%; transform: rotate(15deg); border-radius: 8px;
+            box-shadow: 0 0 15px var(--accent-blue); opacity: 0.8;
+        }
+        .map-route::after {
+            content: ''; position: absolute; bottom: -5px; left: -11px;
+            border-left: 15px solid transparent; border-right: 15px solid transparent;
+            border-top: 25px solid var(--accent-blue); filter: drop-shadow(0 0 5px var(--accent-blue));
+        }
+
+        .turn-overlay {
+            position: absolute; top: 40px; left: 40px; right: 40px;
+            background: rgba(15, 18, 22, 0.85); backdrop-filter: blur(12px);
+            padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);
+            display: flex; align-items: center; gap: 20px;
+        }
+        .turn-icon { font-size: 32px; color: var(--accent-blue); font-weight: bold; }
+        .turn-info { display: flex; flex-direction: column; }
+        .turn-dist { font-size: 24px; font-weight: 600; }
+        .turn-street { font-size: 14px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+
+        /* Camera Feed Overlay */
+        .cam-wrapper {
+            position: absolute; bottom: 40px; left: 40px; width: 140px;
+            background: rgba(0,0,0,0.85); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
+            overflow: hidden; transition: all 0.3s;
+        }
+        .cam-wrapper.danger { border-color: var(--accent-red); box-shadow: 0 0 20px rgba(239, 68, 68, 0.3); }
+        .cam-header { 
+            padding: 8px 12px; font-size: 10px; text-transform: uppercase; color: var(--text-muted);
+            border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;
+        }
+        .cam-dot { width: 6px; height: 6px; background: #22c55e; border-radius: 50%; }
+        .cam-wrapper.danger .cam-dot { background: var(--accent-red); animation: blink 0.5s infinite; }
+        .cam-feed { height: 100px; display: flex; justify-content: center; align-items: center; }
+
+        /* ----- CENTER PANEL (3D ROAD) ----- */
+        .speed-limit-sign {
+            position: absolute; left: 40px; top: 40px; width: 60px; height: 60px;
+            background: white; color: black; border: 5px solid #ef4444; border-radius: 50%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            font-weight: bold; z-index: 20; box-shadow: 0 5px 15px rgba(0,0,0,0.5); font-family: sans-serif;
+        }
+        .speed-limit-sign .val { font-size: 26px; line-height: 1; }
+
+        /* Dynamic Popup Alert (FSD Takeover Style) */
+        .alert-popup {
+            position: absolute; top: 120px; left: 50%; transform: translateX(-50%) translateY(20px);
+            background: rgba(220, 38, 38, 0.95); border: 1px solid #ef4444; border-radius: 8px;
+            padding: 16px 32px; display: flex; align-items: center; gap: 20px;
+            box-shadow: 0 10px 40px rgba(220, 38, 38, 0.5); z-index: 50;
+            opacity: 0; pointer-events: none; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .alert-popup.active { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .alert-icon { font-size: 32px; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.5)); }
+        .alert-title { font-size: 18px; font-weight: 700; letter-spacing: 1px; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+        .alert-desc { font-size: 14px; opacity: 0.9; margin-top: 4px; }
+
+        /* The Road Rendering Engine */
+        .road-view { 
+            position: absolute; inset: 0; perspective: 600px; perspective-origin: 50% 30%; 
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20%);
+            overflow: hidden; pointer-events: none; z-index: 10;
+        }
+
+        .road-plane {
+            position: absolute; bottom: -80px; left: 50%; box-sizing: content-box;
+            width: 600px; height: 4200px; /* Extremely deep focal plane */
+            background-color: #1a1e24; 
+            background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.01) 0px, transparent 2px, rgba(255,255,255,0.01) 4px);
+            box-shadow: inset 30px 0 50px rgba(0,0,0,0.8), inset -30px 0 50px rgba(0,0,0,0.8);
+            transform-origin: bottom center;
+            --shift-x: 0px; 
+            transform: translateX(calc(-50% + var(--shift-x))) rotateX(76deg);
+            transition: transform 4s cubic-bezier(0.4, 0, 0.2, 1);
+            transform-style: preserve-3d; /* Required to let children billboard cleanly */
+        }
+
+        /* Lane Infrastructure mapped flatly to road surface natively */
+        .road-lines {
+            position: absolute; top: -100%; width: 100%; height: 200%;
+            background-image: 
+                linear-gradient(to bottom, rgba(255,255,255,0.5) 40%, transparent 40%),
+                linear-gradient(to bottom, rgba(255,255,255,0.5) 40%, transparent 40%);
+            background-size: 4px 180px, 4px 180px; 
+            background-position: 198px 0, 398px 0; 
+            z-index: 1;
+        }
+
+        .right-shoulder {
+            position: absolute; right: 0; top: 0; width: 8px; height: 100%;
+            background: var(--accent-blue); opacity: 0.6;
+            box-shadow: -5px 0 15px var(--accent-blue); z-index: 1;
+            -webkit-mask-image: linear-gradient(to top, black 0%, transparent 100%);
+        }
+
+        .lane-assist-glow {
+            position: absolute; top: 0; bottom: 0; width: 4px; background: #22c55e; /* Green assist line */
+            box-shadow: 0 0 15px #22c55e, inset 0 0 2px white;
+            transition: left 4s cubic-bezier(0.4, 0, 0.2, 1); z-index: 2; opacity: 0.85;
+            -webkit-mask-image: linear-gradient(to top, black 0%, transparent 100%);
+        }
+
+        .nav-spline {
+            position: absolute; inset: 0; width: 100%; height: 100%;
+            z-index: 2; pointer-events: none;
+        }
+
+        /* Rear-View Billboarded Vehicle Rendering */
+        .car {
+            position: absolute; z-index: 5;
+            /* CRITICAL: Pivot origin must lie natively flush to asphalt */
+            transform-origin: bottom center; 
+            /* Billboarding formula: Translates left via variable positioning, then actively cancels asphalt planar tilt */
+            transform: translateX(-50%) rotateX(-76deg);
+            transition: left 2s cubic-bezier(0.4, 0, 0.2, 1); will-change: top;
+            width: 110px; height: 100px;
+        }
+        
+        .main-car {
+            z-index: 20; 
+            width: 170px; height: 155px; 
+            bottom: 25px; /* Stands vertically attached to bottom perspective */
+            transition: left 4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* Ambient asphalt shadow anchored beneath vertical pivot */
+        .car-shadow {
+            position: absolute; bottom: 0px; left: -5%; width: 110%; height: 25px; 
+            background: rgba(0,0,0,0.85); border-radius: 50%; filter: blur(6px); z-index: -1;
+            /* Crush the shadow flat onto the road while car stands upright natively */
+            transform: rotateX(76deg);
+        }
+        .main-car .car-shadow { height: 40px; filter: blur(10px); background: rgba(0,0,0,0.95); left: -10%; width: 120%; bottom: -10px; }
+
+        /* Hardware indicators placed via absolute map atop the vertical SVG coordinates */
+        .car .brake-light { position: absolute; bottom: 42%; width: 22%; height: 6%; background: transparent; border-radius: 4px; opacity: 0; transition: all 0.15s; z-index: 15; }
+        .car .brake-light.left { left: 12%; }
+        .car .brake-light.right { right: 12%; }
+        .car.braking .brake-light { opacity: 1; background: #ff2a2a; box-shadow: 0 5px 25px rgba(255, 42, 42, 0.9), 0 0 15px rgba(255,0,0,0.6); }
+
+        .car .indicator { position: absolute; bottom: 44%; width: 12%; height: 4%; background: transparent; border-radius: 2px; opacity: 0; z-index: 15; }
+        .car .indicator.left { left: 14%; }
+        .car .indicator.right { right: 14%; }
+        .car .indicator.on { animation: blink 0.5s step-end infinite; background: var(--accent-yellow); box-shadow: 0 0 20px var(--accent-yellow); }
+        
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+        /* ----- RIGHT PANEL (SPEEDOMETER DIAL) ----- */
+        .speedometer {
+            width: 340px; height: 340px; border-radius: 50%;
+            background: radial-gradient(circle at center, #1b212b 0%, #11151d 60%, #050608 100%);
+            border: 4px solid #2a313c; position: relative;
+            box-shadow: 0 0 60px rgba(0,0,0,0.9), inset 0 0 40px rgba(0,0,0,0.8);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+
+        .speedometer::before {
+            content: ''; position: absolute; inset: 0; border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.03); pointer-events: none;
+            box-shadow: inset 0 0 30px rgba(0,0,0, 0.8);
+        }
+
+        .speed-ticks {
+            position: absolute; width: 100%; height: 100%; top: 0; left: 0;
+            border-radius: 50%; pointer-events: none;
+        }
+        
+        .speed-tick {
+            position: absolute; bottom: 50%; left: 50%; width: 2px; height: 8px;
+            background: rgba(255,255,255,0.3);
+            transform-origin: bottom center;
+        }
+        .speed-tick.mid { height: 12px; background: rgba(255,255,255,0.6); }
+        .speed-tick.major { height: 16px; width: 3px; background: rgba(255,255,255,0.9); }
+        .speed-tick.danger { background: var(--accent-red); box-shadow: 0 0 5px var(--accent-red); }
+
+        .speed-numbers {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;
+        }
+        
+        .speed-number {
+            position: absolute; top: 50%; left: 50%;
+            width: 40px; height: 20px;
+            margin-left: -20px; margin-top: -10px;
+            text-align: center; font-size: 16px; font-weight: 600; color: #e2e8f0;
+            text-shadow: 0 0 4px rgba(255,255,255,0.3);
+        }
+
+        .speed-needle-container {
+            position: absolute; top: 50%; left: 50%; width: 100%; height: 100%;
+            margin-left: -50%; margin-top: -50%;
+            transform: rotate(-130deg); 
+            transition: transform 0.1s linear; z-index: 10;
+        }
+        
+        .speed-needle {
+            position: absolute; bottom: 50%; left: 50%;
+            width: 4px; height: 140px; margin-left: -2px;
+            background: linear-gradient(to top, transparent 10%, #ef4444 60%, #fca5a5 100%);
+            border-radius: 4px 4px 0 0;
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.8);
+            transform-origin: bottom center;
+        }
+
+        .speed-needle::after {
+            content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+            width: 1px; height: 100%; background: rgba(255,255,255,0.8);
+        }
+
+        .speed-center-cap {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 44px; height: 44px; border-radius: 50%;
+            background: radial-gradient(circle at top left, #475569, #0f172a);
+            border: 2px solid #1e293b; box-shadow: 0 8px 20px rgba(0,0,0,0.8); z-index: 15;
+        }
+
+        .speed-digital {
+            position: absolute; bottom: 65px; left: 50%; transform: translateX(-50%);
+            text-align: center; z-index: 5;
+        }
+        
+        .speed-digital div:first-child {
+            font-size: 38px; font-weight: 400; letter-spacing: 1px; line-height: 1; text-shadow: 0 0 15px rgba(255,255,255,0.2);
+        }
+        
+        .speed-digital-unit {
+            font-size: 13px; color: var(--text-muted); text-transform: uppercase; margin-top: 4px; font-weight: 600; letter-spacing: 1px;
+        }
+
+        #fadeOverlay { position: fixed; inset: 0; background: var(--bg-color); opacity: 0; pointer-events: none; z-index: 100; transition: opacity 0.6s; }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard">
+
+        <!-- MAP PANEL (LEFT) -->
+        <div class="panel map-panel">
+            <div class="map-bg"></div>
+            <div class="map-route"></div>
+            
+            <div class="turn-overlay">
+                <div class="turn-icon">↑</div>
+                <div class="turn-info">
+                    <span class="turn-dist">3.2 km</span>
+                    <span class="turn-street">M1 Northbound</span>
+                </div>
+            </div>
+
+            <!-- Driver Cam Box -->
+            <div class="cam-wrapper" id="cameraBox">
+                <div class="cam-header">Driver Camera <span class="cam-dot"></span></div>
+                <div class="cam-feed">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 40px; height: 40px; color: #475569;">
+                        <circle cx="12" cy="10" r="4"/>
+                        <path d="M6 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/>
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- ROAD PANEL (CENTER) -->
+        <div class="panel road-panel">
+            
+            <div class="speed-limit-sign">
+                <div class="val">120</div>
+            </div>
+
+            <div class="alert-popup" id="alertBox">
+                <div class="alert-icon">⚠️</div>
+                <div>
+                    <div class="alert-title" id="alertTitle">TAKE OVER STEERING</div>
+                    <div class="alert-desc" id="alertDesc">Driver Drowsiness Detected</div>
+                </div>
+            </div>
+
+            <div class="road-view">
+                <div class="road-plane" id="roadPlane">
+                    <!-- Nav Assist Lines mapped to flat asphalt perfectly -->
+                    <div class="lane-assist-glow" id="assistLeft"></div>
+                    <div class="lane-assist-glow" id="assistRight"></div>
+                    
+                    <!-- Projected Routing Path built recursively onto flat surface -->
+                    <svg class="nav-spline" viewBox="0 0 600 4200" preserveAspectRatio="none">
+                        <path id="navPath" d="" fill="none" stroke="#22c55e" stroke-width="6" stroke-dasharray="15 15" opacity="0" style="filter: drop-shadow(0 0 8px #22c55e); transition: opacity 0.5s;"/>
+                    </svg>
+                    
+                    <div class="right-shoulder"></div>
+                    <div class="road-lines" id="roadLines"></div>
+                    
+                    <!-- Physics Traffic Container -->
+                    <div id="trafficContainer"></div>
+                    
+                    <!-- Main Billboarded Ego Geometry -->
+                    <div class="car main-car" id="mainCar">
+                        <div class="car-shadow"></div>
+                        <!-- SVG graphic injected natively below -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DIAL PANEL (RIGHT) -->
+        <div class="panel dial-panel">
+            <div class="speedometer">
+                <div class="speed-ticks" id="speedTicks"></div>
+                <div class="speed-numbers" id="speedNumbers"></div>
+                <!-- Needle container -->
+                <div class="speed-needle-container" id="speedNeedle">
+                    <div class="speed-needle"></div>
+                </div>
+                <!-- Center cap -->
+                <div class="speed-center-cap"></div>
+                <!-- Digital display inside the gauge -->
+                <div class="speed-digital">
+                    <div id="speedValueRight">115</div>
+                    <div class="speed-digital-unit">km/h</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+    
+    <div id="fadeOverlay"></div>
+
+    <script>
+        // --- INTERACTIVE BEHAVIORS ADDED ---
+        // Left indicator, accurate lane change, braking, hazard lights, and Driver Camera integration.
+        // Fully automated interactive sequence runs on load.
+
+        // Highly Detailed 3D Rear-View Car Model (Petrol Sedan Aesthetic)
+        const getCarSvg = (bodyColor) => `
+        <svg viewBox="0 0 160 140" width="100%" height="100%" preserveAspectRatio="xMidYMax meet" style="display:block; overflow:visible;">
+            <defs>
+                <linearGradient id="bodyGrad-\${bodyColor.slice(1)}" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stop-color="\${bodyColor}" />
+                    <stop offset="60%" stop-color="\${bodyColor}" />
+                    <stop offset="100%" stop-color="#020202" />
+                </linearGradient>
+                <linearGradient id="glassGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stop-color="#020202" />
+                    <stop offset="100%" stop-color="#111" />
+                </linearGradient>
+            </defs>
+            <!-- Tires -->
+            <rect x="20" y="105" width="28" height="32" rx="6" fill="#050505" />
+            <rect x="112" y="105" width="28" height="32" rx="6" fill="#050505" />
+            
+            <!-- Bottom Diffuser & Petrol Exhausts -->
+            <path d="M 30,120 L 130,120 L 120,130 L 40,130 Z" fill="#0a0a0c" />
+            <path d="M 35,122 L 50,122 L 48,128 L 37,128 Z" fill="#000" stroke="#555" stroke-width="1.5" rx="2" />
+            <path d="M 110,122 L 125,122 L 123,128 L 112,128 Z" fill="#000" stroke="#555" stroke-width="1.5" rx="2" />
+
+            <!-- Lower Bumper Silhouette -->
+            <path d="M 15,85 Q 5,115 30,120 L 130,120 Q 155,115 145,85 Z" fill="url(#bodyGrad-\${bodyColor.slice(1)})"/>
+            
+            <!-- Main Body Rear Shoulders -->
+            <path d="M 18,60 Q 5,85 15,85 L 145,85 Q 155,85 142,60 Q 110,50 80,50 Q 50,50 18,60 Z" fill="\${bodyColor}" />
+            
+            <!-- Trunk Lid Curve -->
+            <path d="M 35,62 Q 80,55 125,62 L 115,75 L 45,75 Z" fill="#000" opacity="0.15" />
+
+            <!-- License Plate -->
+            <rect x="60" y="90" width="40" height="18" rx="2" fill="#050505" stroke="#1a1a1a" stroke-width="2"/>
+            <rect x="64" y="94" width="32" height="10" rx="1" fill="#e2e8f0" />
+
+            <!-- Side Mirrors -->
+            <path d="M 5,52 Q 22,50 22,60 L 5,58 Z" fill="#111"/>
+            <path d="M 155,52 Q 138,50 138,60 L 155,58 Z" fill="#111"/>
+
+            <!-- C-pillars -->
+            <path d="M 30,60 L 48,25 C 65,15 95,15 112,25 L 130,60 Z" fill="\${bodyColor}"/>
+            
+            <!-- Rear Window Glass -->
+            <path d="M 36,58 L 52,25 C 65,18 95,18 108,25 L 124,58 Z" fill="url(#glassGrad)"/>
+            
+            <!-- Tail Lights Base -->
+            <path d="M 18,72 C 35,68 55,72 65,80 L 18,80 Z" fill="#310000" stroke="#520000" stroke-width="1"/>
+            <path d="M 142,72 C 125,68 105,72 95,80 L 142,80 Z" fill="#310000" stroke="#520000" stroke-width="1"/>
+            
+            <!-- Tail Light LED Strips (Idle) -->
+            <path d="M 22,75 C 35,72 50,75 55,77" fill="none" stroke="#ff1a1a" stroke-width="2" opacity="0.8" filter="drop-shadow(0 0 3px #ff0000)"/>
+            <path d="M 138,75 C 125,72 110,75 105,77" fill="none" stroke="#ff1a1a" stroke-width="2" opacity="0.8" filter="drop-shadow(0 0 3px #ff0000)"/>
+        </svg>
+        <div class="indicator left"></div><div class="indicator right"></div>
+        <div class="brake-light left"></div><div class="brake-light right"></div>
+        `;
+
+        function renderSpeedometer() {
+            const ticksCtx = document.getElementById('speedTicks');
+            const numCtx = document.getElementById('speedNumbers');
+            
+            const maxSpeed = 240;
+            const startAngle = -130; 
+            const endAngle = 130;
+            const totalAngle = endAngle - startAngle;
+            
+            for(let i = 0; i <= maxSpeed; i += 2) {
+                let tick = document.createElement('div');
+                tick.className = 'speed-tick';
+                
+                if (i % 20 === 0) tick.classList.add('major');
+                else if (i % 10 === 0) tick.classList.add('mid');
+                
+                if (i >= 180) tick.classList.add('danger');
+                
+                let ratio = i / maxSpeed;
+                let angle = startAngle + (ratio * totalAngle);
+                
+                tick.style.transform = `rotate(${angle}deg) translateY(-145px)`;
+                ticksCtx.appendChild(tick);
+                
+                if (i % 20 === 0) {
+                    let numWrapper = document.createElement('div');
+                    numWrapper.className = 'speed-number';
+                    numWrapper.innerText = i;
+                    
+                    let numRadius = 112; 
+                    let rad = (angle - 90) * (Math.PI / 180);
+                    let x = Math.cos(rad) * numRadius;
+                    let y = Math.sin(rad) * numRadius;
+                    
+                    numWrapper.style.transform = `translate(${x}px, ${y}px)`;
+                    numCtx.appendChild(numWrapper);
+                }
+            }
+        }
+        renderSpeedometer();
+
+        // Mathematical Scaling Metrics
+        const LANE_CENTERS = [100, 300, 500]; // Anchored inside flat .road-plane mathematically
+        // Since footprints are 2D slivers on road ground natively, realistic math distances translate flawlessly
+        const SAFE_DIST = 450; 
+        const EGO_Y_STATIC = 3900; 
+
+        // DOM Referencers
+        const mainCar = document.getElementById('mainCar');
+        const roadPlane = document.getElementById('roadPlane');
+        const roadLines = document.getElementById('roadLines');
+        const alertBox = document.getElementById('alertBox');
+        const camBox = document.getElementById('cameraBox');
+        const navPath = document.getElementById('navPath');
+        const assistLeft = document.getElementById('assistLeft');
+        const assistRight = document.getElementById('assistRight');
+        
+        // Inject Ego Vehicle Hardware
+        mainCar.innerHTML += getCarSvg('#cbd5e1'); 
+
+        let isStopped = false; let sequenceState = 'NORMAL'; 
+        let trafficCars = []; let roadOffsetY = 0;
+        
+        const mainCarEntity = {
+            isEgo: true, laneIndex: 1, y: EGO_Y_STATIC,
+            speed: 115, desiredSpeed: 115, targetSpeed: 115, brakesActive: false
+        };
+
+        function createTraffic(count) {
+            const container = document.getElementById('trafficContainer');
+            // Natural Automotive Factory Swatches
+            const tints = ['#1e293b', '#64748b', '#334155', '#475569', '#0f172a', '#7f1d1d', '#1e3a8a'];
+            for(let i = 0; i < count; i++) {
+                let el = document.createElement('div');
+                el.className = 'car traffic-car';
+                el.innerHTML = '<div class="car-shadow"></div>' + getCarSvg(tints[Math.floor(Math.random() * tints.length)]);
+                container.appendChild(el);
+                
+                let car = { el, y: 0, speed: 0, desiredSpeed: 0, laneIndex: 0, targetSpeed: 0, brakesActive: false };
+                resetCar(car, Math.random() > 0.5);
+                trafficCars.push(car);
+            }
+        }
+
+        // Logic routing native spawn checking preventing any visual pop-in overlaps
+        function resetCar(car, spawnBehind) {
+            let attemptLanes = [0, 1, 2].sort(() => Math.random() - 0.5);
+            for (let lane of attemptLanes) {
+                let spawnY = spawnBehind ? (4600 + Math.random() * 800) : (-800 - Math.random() * 2500);
+                let clear = true;
+                for (let other of trafficCars) {
+                    if (other !== car && other.laneIndex === lane && Math.abs(other.y - spawnY) < 600) clear = false;
+                }
+                if (clear) {
+                    car.laneIndex = lane; car.y = spawnY;
+                    car.desiredSpeed = spawnBehind ? (mainCarEntity.speed + 10 + Math.random() * 15) : Math.max(70, mainCarEntity.speed - 15 - Math.random() * 15);
+                    car.speed = car.desiredSpeed;
+                    car.el.style.left = LANE_CENTERS[car.laneIndex] + 'px';
+                    return;
+                }
+            }
+            car.y = spawnBehind ? 12000 : -12000; 
+        }
+
+        function loop() {
+            let allVehicles = [...trafficCars, mainCarEntity];
+            
+            // 1. Collision Mathematics calculating proximity native gaps
+            allVehicles.forEach(v => {
+                let ahead = null; let minDist = Infinity;
+                allVehicles.forEach(other => {
+                    if (other !== v && other.laneIndex === v.laneIndex && other.y < v.y) {
+                        let dist = v.y - other.y;
+                        if (dist < minDist) { minDist = dist; ahead = other; }
+                    }
+                });
+
+                if (ahead && minDist < SAFE_DIST) {
+                    v.targetSpeed = ahead.speed - 5; 
+                    v.brakesActive = (v.speed > v.targetSpeed + 3); 
+                } else if (ahead && minDist < SAFE_DIST + 200) {
+                    v.targetSpeed = ahead.speed; v.brakesActive = false;
+                } else {
+                    v.targetSpeed = v.desiredSpeed; v.brakesActive = false;
+                }
+                
+                if (sequenceState === 'BRAKING' && v.isEgo) {
+                    v.targetSpeed = 0; v.brakesActive = true;
+                }
+            });
+
+            // 2. Trajectory Accel/Decel
+            allVehicles.forEach(v => {
+                if (v.speed < v.targetSpeed) v.speed += 0.4;
+                else if (v.speed > v.targetSpeed) v.speed -= 1.0;
+                v.speed = Math.max(0, v.speed);
+            });
+            
+            let currentMainSpeed = mainCarEntity.speed;
+            if (sequenceState === 'BRAKING' && currentMainSpeed === 0 && !isStopped) { isStopped = true; onStoppedState(); }
+
+            // Speedometer update
+            let displaySpeedKm = currentMainSpeed;
+            const maxSpeed = 240;
+            const startAngle = -130; 
+            const endAngle = 130;
+            const totalAngle = endAngle - startAngle;
+            let clampedSpeed = Math.min(Math.max(displaySpeedKm, 0), maxSpeed);
+            let needleAngle = startAngle + ((clampedSpeed / maxSpeed) * totalAngle);
+            
+            document.getElementById('speedValueRight').innerText = Math.floor(displaySpeedKm);
+            document.getElementById('speedNeedle').style.transform = `rotate(${needleAngle}deg)`;
+
+            let speedFactor = currentMainSpeed * 0.15; 
+            roadOffsetY = (roadOffsetY + speedFactor) % 180;
+            roadLines.style.transform = `translateY(${roadOffsetY}px)`;
+
+            assistLeft.style.left = (LANE_CENTERS[mainCarEntity.laneIndex] - 100) + 'px';
+            assistRight.style.left = (LANE_CENTERS[mainCarEntity.laneIndex] + 100) + 'px';
+
+            // 3. Render Positions utilizing 2D scale manipulation mapped natively by billboarding hierarchy
+            trafficCars.forEach(car => {
+                car.y += (currentMainSpeed - car.speed) * 0.15; 
+                car.el.style.top = car.y + 'px';
+                
+                if (car.brakesActive) car.el.classList.add('braking');
+                else car.el.classList.remove('braking');
+                
+                // Active Overtake Engine Simulation
+                if (car.speed < car.desiredSpeed - 10 && Math.random() < 0.01) {
+                    let nextL = car.laneIndex + (Math.random() > 0.5 ? 1 : -1);
+                    if (nextL >= 0 && nextL <= 2) {
+                        let isClear = true;
+                        allVehicles.forEach(oth => { if (oth !== car && oth.laneIndex === nextL && Math.abs(oth.y - car.y) < 600) isClear = false; });
+                        if (isClear) { car.laneIndex = nextL; car.el.style.left = LANE_CENTERS[car.laneIndex] + 'px'; }
+                    }
+                }
+                if (car.y > 4800) resetCar(car, false);
+                else if (car.y < -3000) resetCar(car, true);
+            });
+            
+            // 4. Emergency Lane Mapping Projection Math natively rendered ahead of Ego vehicle on asphalt plane
+            if (sequenceState === 'WAIT_FOR_LANE') {
+                const TARGET_LANE = 0; let isClear = true;
+                trafficCars.forEach(oth => {
+                    if (oth.laneIndex === TARGET_LANE) {
+                        let dist = mainCarEntity.y - oth.y;
+                        if (dist < 0 && Math.abs(dist) < 700 && mainCarEntity.speed >= oth.speed) isClear = false;
+                        else if (dist > 0 && Math.abs(dist) < 600 && oth.speed >= mainCarEntity.speed) isClear = false;
+                        else if (Math.abs(dist) < 450) isClear = false;
+                    }
+                });
+                
+                if (isClear) {
+                    sequenceState = 'LANE_CHANGE';
+                    mainCarEntity.laneIndex = TARGET_LANE;
+                    mainCar.style.left = LANE_CENTERS[TARGET_LANE] + 'px';
+                    roadPlane.style.setProperty('--shift-x', '200px'); // Countershift maintaining identical Ego focal plane
+                    
+                    setTimeout(() => { navPath.style.opacity = '0'; }, 3000); // Dissolve trajectory path cleanly once established
+                    setTimeout(() => { setSystemState('BRAKING'); }, 3500);
+                }
+            }
+            
+            if (mainCarEntity.brakesActive) mainCar.classList.add('braking');
+            else mainCar.classList.remove('braking');
+            
+            requestAnimationFrame(loop);
+        }
+
+        // FSD Logic Controllers
+        const setIndicator = (mode) => {
+            const indL = mainCar.querySelector('.indicator.left');
+            const indR = mainCar.querySelector('.indicator.right');
+            indL.classList.remove('on');
+            indR.classList.remove('on');
+            if (mode === 'left') indL.classList.add('on');
+            else if (mode === 'right') indR.classList.add('on');
+            else if (mode === 'hazard') { indL.classList.add('on'); indR.classList.add('on'); }
+        };
+
+        function setSystemState(state) {
+            if (state === 'NORMAL') {
+                alertBox.classList.remove('active');
+                camBox.classList.remove('danger');
+                navPath.style.opacity = '0';
+                setIndicator('none'); mainCarEntity.desiredSpeed = 115;
+                mainCar.style.left = LANE_CENTERS[1] + 'px'; roadPlane.style.setProperty('--shift-x', '0px');
+                isStopped = false;
+            } 
+            else if (state === 'DROWSINESS') {
+                alertBox.classList.add('active');
+                camBox.classList.add('danger');
+                setIndicator('left');
+            }
+            else if (state === 'WAIT_FOR_LANE') {
+                sequenceState = 'WAIT_FOR_LANE';
+                document.getElementById('alertTitle').innerText = 'CALCULATING SAFE MERGE';
+                document.getElementById('alertDesc').innerText = 'Autopilot scanning left lane trajectories...';
+                
+                // Dynamically construct and illuminate geometric SVG route mapping lane shift onto pseudo-3D asphalt natively
+                let startX = LANE_CENTERS[1]; 
+                let tgtX = LANE_CENTERS[0];
+                navPath.setAttribute('d', `M \${startX} \${EGO_Y_STATIC} C \${startX} \${EGO_Y_STATIC - 500}, \${tgtX} \${EGO_Y_STATIC - 500}, \${tgtX} \${EGO_Y_STATIC - 1000} L \${tgtX} 0`);
+                navPath.style.opacity = '1';
+            }
+            else if (state === 'BRAKING') {
+                sequenceState = 'BRAKING'; 
+                document.getElementById('alertTitle').innerText = 'EMERGENCY STOP ENGAGED';
+                document.getElementById('alertDesc').innerText = 'Applying dynamic safe braking envelope...';
+                setIndicator('none');
+            }
+        }
+
+        function onStoppedState() {
+            setIndicator('hazard');
+            document.getElementById('alertTitle').innerText = 'VEHICLE SAFELY SECURED';
+            document.getElementById('alertDesc').innerText = 'Hazard protocol successful. Please exit system.';
+            
+            setTimeout(() => {
+                document.getElementById('fadeOverlay').style.opacity = '1';
+                setTimeout(() => {
+                    mainCar.style.transition = 'none'; roadPlane.style.transition = 'none'; assistLeft.style.transition = 'none'; assistRight.style.transition = 'none';
+                    mainCarEntity.laneIndex = 1; mainCarEntity.speed = 115; mainCarEntity.desiredSpeed = 115; mainCarEntity.targetSpeed = 115;
+                    mainCar.style.left = LANE_CENTERS[1] + 'px'; roadPlane.style.setProperty('--shift-x', '0px');
+                    sequenceState = 'NORMAL'; navPath.style.opacity = '0';
+                    setIndicator('none');
+                    trafficCars.forEach(c => c.el.remove()); trafficCars = []; createTraffic(7);
+                    
+                    setTimeout(() => {
+                        document.getElementById('fadeOverlay').style.opacity = '0';
+                        mainCar.style.transition = 'left 4s cubic-bezier(0.4, 0, 0.2, 1)'; roadPlane.style.transition = 'transform 4s cubic-bezier(0.4, 0, 0.2, 1)';
+                        assistLeft.style.transition = 'left 4s cubic-bezier(0.4, 0, 0.2, 1)'; assistRight.style.transition = 'left 4s cubic-bezier(0.4, 0, 0.2, 1)';
+                        startSequence();
+                    }, 100);
+                }, 600); 
+            }, 6000); 
+        }
+
+        function startSequence() {
+            setSystemState('NORMAL');
+            setTimeout(() => { setSystemState('DROWSINESS'); setTimeout(() => { setSystemState('WAIT_FOR_LANE'); }, 3000); }, 7000); 
+        }
+
+        createTraffic(7); loop(); startSequence();
+
+    </script>
+</body>
+</html>
