@@ -3,7 +3,7 @@
 A real-time Driver Drowsiness Detection System built using Python, OpenCV and MediaPipe.
 
 ## Project Structure
-
+```text
 Driver-Drowsiness-Detection/
 │
 ├── backend/
@@ -19,7 +19,7 @@ Driver-Drowsiness-Detection/
 ├── .gitignore
 ├── requirements.txt
 └── README.md
-
+```
 ## Features
 
 - Real-time face detection
